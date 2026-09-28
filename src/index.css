@@ -549,6 +549,7 @@ html, body, #root {
   .mobile-chat-messages .message-bubble[data-is-user="true"] { border-bottom-right-radius: 6px !important; }
   .mobile-chat-messages .message-bubble[data-is-user="false"] { border-bottom-left-radius: 6px !important; }
   .mobile-chat-messages .message-bubble[data-is-thought="true"] { background: #232328 !important; color: #c0c0ca !important; }
+  .mobile-chat-messages .message-bubble.search-hit { outline: 2px solid #7192ff; outline-offset: 3px; }
   .mobile-chat-messages .message-bubble .markdown-body { font-size: inherit !important; line-height: inherit !important; }
   .mobile-chat-messages .message-bubble .markdown-body > p { margin: 0; }
   .mobile-chat-messages .message-bubble .markdown-body > p + p { margin-top: 0.85em; }

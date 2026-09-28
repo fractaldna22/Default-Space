@@ -5,6 +5,7 @@ import { getModelIcon } from '../utils/modelIcons';
 
 type Model = { id: string; name: string; desc?: string };
 type HomeTab = 'inbox' | 'models' | 'tools';
+let savedInboxSearch = '';
 
 interface Props {
   tab: HomeTab;
@@ -12,7 +13,7 @@ interface Props {
   models: Model[];
   activeSpaceId: string;
   onTabChange: (tab: HomeTab) => void;
-  onOpenThread: (spaceId: string, threadId: string) => void;
+  onOpenThread: (spaceId: string, threadId: string, messageId?: string) => void;
   onStartModel: (model: Model) => void;
   onOpenTool: (tab: 'prompt' | 'notes' | 'memories' | 'drive') => void;
   onOpenNavigator: () => void;
@@ -80,7 +81,7 @@ function friendlyTime(value: string) {
 }
 
 export function MobileMessenger({ tab, spaces, models, activeSpaceId, onTabChange, onOpenThread, onStartModel, onOpenTool, onOpenNavigator, onOpenSettings }: Props) {
-  const [inboxSearch, setInboxSearch] = useState('');
+  const [inboxSearch, setInboxSearch] = useState(savedInboxSearch);
   const [modelSearch, setModelSearch] = useState('');
   const [inboxLimit, setInboxLimit] = useState(30);
   const [modelLimit, setModelLimit] = useState(60);
@@ -105,15 +106,30 @@ export function MobileMessenger({ tab, spaces, models, activeSpaceId, onTabChang
       spaceId: space.id, threadId: thread.id, title: thread.title,
       modelId, modelName: model?.name || modelId.split('/').pop() || 'Model',
       spaceName: space.name,
+      messages: thread.messages,
       preview: lastMessage?.content?.slice(0, 400).replace(/\s+/g, ' ').trim().slice(0, 160) || 'Start a conversation',
       isOwnPreview: lastMessage?.role === 'user',
       time: lastMessage?.timestamp || thread.createdAt,
     };
   })).sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()), [spaces, models]);
 
-  const visibleConversations = conversations.filter(item =>
-    `${item.title} ${item.modelName} ${item.modelId} ${item.spaceName} ${item.preview}`.toLowerCase().includes(inboxSearch.toLowerCase())
-  );
+  const visibleConversations = useMemo(() => {
+    const query = inboxSearch.trim().toLowerCase();
+    if (!query) return conversations.map(item => ({ ...item, matchedCount: 0, matchedMessageId: undefined as string | undefined, searchPreview: '' }));
+    return conversations.flatMap(item => {
+      const matchingMessages = item.messages.filter(message =>
+        !message.isThought && (message.role === 'user' || message.role === 'assistant') && message.content.toLowerCase().includes(query)
+      );
+      const matchesDetails = `${item.title} ${item.modelName} ${item.modelId} ${item.spaceName}`.toLowerCase().includes(query);
+      if (!matchesDetails && matchingMessages.length === 0) return [];
+      const match = matchingMessages[matchingMessages.length - 1];
+      const matchIndex = match?.content.toLowerCase().indexOf(query) ?? -1;
+      const searchPreview = match && matchIndex >= 0
+        ? `${matchIndex > 28 ? '…' : ''}${match.content.slice(Math.max(0, matchIndex - 28), matchIndex + query.length + 95).replace(/\s+/g, ' ').trim()}${matchIndex + query.length + 95 < match.content.length ? '…' : ''}`
+        : '';
+      return [{ ...item, matchedCount: matchingMessages.length, matchedMessageId: match?.id, searchPreview }];
+    });
+  }, [conversations, inboxSearch]);
   const visibleModels = models.filter(model =>
     `${model.name} ${model.id} ${model.desc || ''}`.toLowerCase().includes(modelSearch.toLowerCase())
   );
@@ -130,18 +146,18 @@ export function MobileMessenger({ tab, spaces, models, activeSpaceId, onTabChang
           <button className="mobile-circle-action" type="button" onClick={() => onTabChange('models')} aria-label="New chat with a model" title="New chat"><Plus size={23} /></button>
         </header>
         <div className="mobile-messenger-scroll">
-          <label className="mobile-search"><Search size={21} aria-hidden="true" /><input value={inboxSearch} onChange={event => setInboxSearch(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" /></label>
+          <label className="mobile-search"><Search size={21} aria-hidden="true" /><input value={inboxSearch} onChange={event => { savedInboxSearch = event.target.value; setInboxSearch(event.target.value); }} placeholder="Search chats and messages" aria-label="Search chats and messages" /></label>
           {!inboxSearch && <>
             <div className="mobile-section-heading"><span>Models</span><button onClick={() => onTabChange('models')}>See all <ChevronRight size={16} /></button></div>
             <div className="mobile-model-strip">
               {featuredModels.map(model => <button key={model.id} type="button" onClick={() => onStartModel(model)} className="mobile-model-shortcut" title={`Chat with ${model.name}`}><ModelAvatar id={model.id} name={model.name} size="large" /><span>{model.name.replace(/\s*\([^)]*\)/g, '')}</span></button>)}
             </div>
           </>}
-          <div className="mobile-section-heading"><span>Recent chats</span><span className="mobile-count">{visibleConversations.length}</span></div>
+          <div className="mobile-section-heading"><span>{inboxSearch ? 'Search results' : 'Recent chats'}</span><span className="mobile-count">{visibleConversations.length}</span></div>
           {visibleConversations.length === 0 ? <div className="mobile-empty"><MessageCircle size={32} /><strong>{inboxSearch ? 'No matching chats' : 'Your chats will live here'}</strong><span>{inboxSearch ? 'Try another search.' : 'Choose a model above to start talking.'}</span></div> : <div className="mobile-list">
-            {visibleConversations.slice(0, inboxLimit).map(item => <button className="mobile-conversation-row" key={`${item.spaceId}:${item.threadId}`} type="button" onClick={() => onOpenThread(item.spaceId, item.threadId)}>
+            {visibleConversations.slice(0, inboxLimit).map(item => <button className="mobile-conversation-row" key={`${item.spaceId}:${item.threadId}`} type="button" onClick={() => onOpenThread(item.spaceId, item.threadId, item.matchedMessageId)}>
               <ModelAvatar id={item.modelId} name={item.modelName} />
-              <span className="mobile-row-body"><span className="mobile-row-top"><strong>{item.title === 'New Conversation' ? item.modelName : item.title}</strong><time>{friendlyTime(item.time)}</time></span><span className="mobile-row-sub">{item.isOwnPreview ? 'You: ' : ''}{item.preview}</span><span className="mobile-row-context">{item.modelName}{spaces.length > 1 ? ` · ${item.spaceName}` : ''}</span></span>
+              <span className="mobile-row-body"><span className="mobile-row-top"><strong>{item.title === 'New Conversation' ? item.modelName : item.title}</strong><time>{friendlyTime(item.time)}</time></span><span className="mobile-row-sub">{item.searchPreview ? '' : item.isOwnPreview ? 'You: ' : ''}{item.searchPreview || item.preview}</span><span className="mobile-row-context">{item.matchedCount > 0 ? `${item.matchedCount} matched message${item.matchedCount === 1 ? '' : 's'} · ` : ''}{item.modelName}{spaces.length > 1 ? ` · ${item.spaceName}` : ''}</span></span>
             </button>)}
             {visibleConversations.length > inboxLimit && <button className="mobile-more" onClick={() => setInboxLimit(value => value + 30)}>Show more chats</button>}
           </div>}

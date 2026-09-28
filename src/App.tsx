@@ -451,9 +451,11 @@ const parseThreadTitleCommands = (text: string): string | null => {
   return null;
 };
 
-const isGenericThreadTitle = (title: string): boolean => {
+const isGenericThreadTitle = (title: string, modelId?: string): boolean => {
   const value = title.trim();
-  return !value || value === 'New Conversation' || value.startsWith('Session Reel') || value.startsWith('Thread #');
+  const modelSlug = modelId?.split('/').pop();
+  const matchesModelName = Boolean(modelSlug && value.replace(/[^a-z0-9]/gi, '').toLowerCase() === modelSlug.replace(/[^a-z0-9]/gi, '').toLowerCase());
+  return !value || value === 'New Conversation' || value.startsWith('Session Reel') || value.startsWith('Thread #') || matchesModelName;
 };
 
 const fallbackThreadTitle = (text: string, imageCount: number, audioCount: number): string => {
@@ -643,6 +645,7 @@ export default function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [visibleMessageWindow, setVisibleMessageWindow] = useState<{ threadId: string; count: number } | null>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
+  const pendingSearchJumpRef = useRef<{ threadId: string; messageId: string } | null>(null);
   const pendingScrollRestoreRef = useRef<{ threadId: string; scrollHeight: number; scrollTop: number } | null>(null);
   const [inspectMessageId, setInspectMessageId] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -1455,13 +1458,22 @@ export default function App() {
     const streamingStarted = isStreaming && !prevIsStreamingRef.current;
     const streamingFinished = !isStreaming && prevIsStreamingRef.current;
 
-    if (threadChanged || streamingStarted || streamingFinished) {
+    const searchJump = pendingSearchJumpRef.current;
+    if (searchJump && mobileTab === 'chat' && activeThread?.id === searchJump.threadId) {
+      const target = document.getElementById(`message-bubble-${searchJump.messageId}`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'instant', block: 'center' });
+        target.classList.add('search-hit');
+        window.setTimeout(() => target.classList.remove('search-hit'), 2200);
+        pendingSearchJumpRef.current = null;
+      }
+    } else if (threadChanged || streamingStarted || streamingFinished) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
 
     prevIsStreamingRef.current = isStreaming;
     prevThreadIdRef.current = activeThread?.id;
-  }, [activeThread?.id, isStreaming]);
+  }, [activeThread?.id, isStreaming, mobileTab, visibleMessageWindow]);
 
   // Auto-resize edit message textarea (capped at normal flexible max height)
   useEffect(() => {
@@ -1959,7 +1971,13 @@ ${summariesText}`
     });
   };
 
-  const openMobileThread = useCallback((spaceId: string, threadId: string) => {
+  const openMobileThread = useCallback((spaceId: string, threadId: string, messageId?: string) => {
+    const thread = spacesRef.current.find(space => space.id === spaceId)?.threads.find(item => item.id === threadId);
+    const messageIndex = messageId ? thread?.messages.findIndex(message => message.id === messageId) ?? -1 : -1;
+    pendingSearchJumpRef.current = messageIndex >= 0 && messageId ? { threadId, messageId } : null;
+    setVisibleMessageWindow(messageIndex >= 0 && thread
+      ? { threadId, count: thread.messages.length - messageIndex }
+      : null);
     setSpaces(prev => prev.map(space => {
       if (space.id !== spaceId) return space;
       const thread = space.threads.find(item => item.id === threadId);
@@ -1972,7 +1990,7 @@ ${summariesText}`
   const startMobileModelChat = useCallback((model: { id: string; name: string }) => {
     const thread: Thread = {
       id: `thread-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      title: model.name.replace(/\s*\([^)]*\)/g, ''),
+      title: 'New Conversation',
       createdAt: new Date().toISOString(),
       modelId: model.id,
       enableAudioOutput: false,
@@ -1991,7 +2009,7 @@ ${summariesText}`
         ...s,
         threads: s.threads.map(t => {
           if (t.id !== threadId) return t;
-          if (onlyIfGeneric && !isGenericThreadTitle(t.title)) return t;
+          if (onlyIfGeneric && !isGenericThreadTitle(t.title, t.modelId || s.model)) return t;
           return { ...t, title: newTitle.trim() };
         })
       }));
@@ -4455,11 +4473,11 @@ ${summariesText}`
         handleRenameThread(currentTargetThreadId, titleFromCommand);
       } else if (currentTargetThreadId) {
         const currentThreadObj = activeSpace.threads.find(t => t.id === currentTargetThreadId);
-        const isGenericTitle = !currentThreadObj || isGenericThreadTitle(currentThreadObj.title);
+        const isGenericTitle = !currentThreadObj || isGenericThreadTitle(currentThreadObj.title, currentThreadObj.modelId || activeSpace.model);
         
         const userMsgCount = (currentThreadObj?.messages.filter(m => m.role === 'user').length || 0) + 1;
 
-        if (isGenericTitle && userMsgCount >= 1 && userMsgCount <= 3) {
+        if (isGenericTitle && userMsgCount >= 1) {
           fetch('/api/threads/generate-title', {
             method: 'POST',
             headers: {
