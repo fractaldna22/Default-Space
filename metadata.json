@@ -1,0 +1,8 @@
+{
+  "name": "Default Space",
+  "description": "An advanced, high-control custom cockpit shell for GitHub Models including 4o, featuring spaces context, memories, editable persona scaffolds, prompt stack transparency, and micro-tuning controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
